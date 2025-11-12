@@ -1,68 +1,59 @@
-/**
- * ipwho-de.js 优化版 - Quantumult X
- * 功能：
- * 1. 多接口 GEO-IP 查询，失败自动切换
- * 2. 输出 IP、国家、城市、ISP
- * 3. 可根据国家自动切换策略（可自定义）
- * 4. 缓存 5 分钟，减少重复请求
- */
+/*
+Quantumult X geo_location_checker 中文增强版
+数据源：api.ip.sb（高精度）
+显示：国家旗帜 + 中文地区 + 城市 + ISP
+作者：ChatGPT (2025)
+*/
 
-const API_LIST = [
-    "https://api.ip.sb/geoip",
-    "https://ipapi.co/json",
-    "https://ipwho.de/json"
-];
-
-const CACHE_KEY = "geo_ip_cache";
-const CACHE_DURATION = 5 * 60 * 1000; // 5分钟
-
-(async function main() {
-    let cached = $prefs.valueForKey(CACHE_KEY);
-    if (cached) {
-        try {
-            let cachedData = JSON.parse(cached);
-            if (Date.now() - cachedData.time < CACHE_DURATION) {
-                return output(cachedData.data, true);
-            }
-        } catch (e) {}
-    }
-
-    let geoData = null;
-    for (let url of API_LIST) {
-        try {
-            let resp = await $httpClient.get(url);
-            if (!resp || !resp.body) continue;
-            let data = JSON.parse(resp.body);
-            if (data && (data.country || data.country_name)) {
-                geoData = data;
-                break;
-            }
-        } catch (e) {
-            continue;
-        }
-    }
-
-    if (!geoData) {
-        geoData = { ip: "0.0.0.0", country: "Unknown", city: "N/A", organization: "N/A" };
-    }
-
-    $prefs.setValueForKey(JSON.stringify({ time: Date.now(), data: geoData }), CACHE_KEY);
-    output(geoData);
-})();
-
-function output(data, fromCache = false) {
-    // 兼容不同接口字段
-    let ip = data.ip || data.IP || "0.0.0.0";
-    let country = data.country || data.country_name || "Unknown";
-    let city = data.city || "N/A";
-    let isp = data.org || data.organization || "N/A";
-
-    // 可选策略判断（按国家切换）
-    let strategy = country === "Japan" ? "JP节点" :
-                   country === "China" ? "CN节点" : "Default";
-
-    $done({
-        title: fromCache ? `缓存 GEO-IP: ${ip}` : `GEO-IP: ${ip}`,
-        body: `国家: ${country}\n城市: ${city}\nISP: ${isp}\n策略: ${strategy}`
+;(async () => {
+  const url = "https://api.ip.sb/geoip";
+  const flagEmoji = (cc) => {
+    if (!cc || cc.length !== 2) return "🏳️";
+    const codePoints = [...cc.toUpperCase()].map(c => 127397 + c.charCodeAt());
+    return String.fromCodePoint(...codePoints);
+  };
+  try {
+    const resp = await new Promise((resolve, reject) => {
+      $httpClient.get(url, (error, response, data) => {
+        if (error) reject(error);
+        else resolve(data);
+      });
     });
-}
+    const info = JSON.parse(resp);
+    const ip = info.ip || info.query || "未知 IP";
+    const cc = info.country_code || info.country_code_iso || "";
+    const flag = flagEmoji(cc);
+    const country = info.country || info.country_name || "未知国家";
+    const region = info.region || info.region_name || "";
+    const city = info.city || "";
+    const isp = info.organization || info.org || info.isp || "未知运营商";
+
+    // 中文化部分（常见地区翻译）
+    const zhMap = {
+      Japan: "日本",
+      Korea: "韩国",
+      China: "中国",
+      Taiwan: "台湾",
+      HongKong: "香港",
+      Singapore: "新加坡",
+      UnitedStates: "美国",
+      Germany: "德国",
+      Netherlands: "荷兰"
+    };
+    const zhCountry = zhMap[country.replace(/\s/g, "")] || country;
+
+    const title = `${flag} ${zhCountry}${region ? "·" + region : ""}${city ? "·" + city : ""}`;
+    const content = `IP：${ip}\n运营商：${isp}`;
+    $done({
+      title,
+      content,
+      icon: "globe.asia.australia.fill"
+    });
+  } catch (e) {
+    $done({
+      title: "查询失败",
+      content: String(e),
+      icon: "exclamationmark.triangle.fill"
+    });
+  }
+})();
